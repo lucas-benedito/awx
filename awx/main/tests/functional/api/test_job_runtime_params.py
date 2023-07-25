@@ -692,6 +692,35 @@ def test_callback_accept_prompted_extra_var(mocker, survey_spec_factory, job_tem
 
 @pytest.mark.django_db
 @pytest.mark.job_runtime_vars
+def test_callback_branch_override_extra_var(mocker, survey_spec_factory, job_template_prompts, post, admin_user, host):
+    job_template = job_template_prompts(True)
+    job_template.host_config_key = "foo"
+    job_template.survey_enabled = False
+    job_template.save()
+
+    with mocker.patch('awx.main.access.BaseAccess.check_license'):
+        mock_job = mocker.MagicMock(spec=Job, id=968, extra_vars={"scm_branch": "test"})
+        with mocker.patch.object(UnifiedJobTemplate, 'create_unified_job', return_value=mock_job):
+            with mocker.patch('awx.api.serializers.JobSerializer.to_representation', return_value={}):
+                with mocker.patch('awx.api.views.JobTemplateCallback.find_matching_hosts', return_value=[host]):
+                    post(
+                        reverse('api:job_template_callback', kwargs={'pk': job_template.pk}),
+                        dict(extra_vars={"scm_branch": "test"}, host_config_key="foo"),
+                        admin_user,
+                        expect=201,
+                        format='json',
+                    )
+                    assert UnifiedJobTemplate.create_unified_job.called
+                    call_args = UnifiedJobTemplate.create_unified_job.call_args[1]
+                    call_args.pop('_eager_fields', None)  # internal purposes
+                    print(call_args)
+                    assert call_args == {'extra_vars': {'scm_branch': "test"}, 'limit': 'single-host'}
+
+    mock_job.signal_start.assert_called_once()
+
+
+@pytest.mark.django_db
+@pytest.mark.job_runtime_vars
 def test_callback_ignore_unprompted_extra_var(mocker, survey_spec_factory, job_template_prompts, post, admin_user, host):
     job_template = job_template_prompts(False)
     job_template.host_config_key = "foo"
