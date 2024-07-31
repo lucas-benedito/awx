@@ -22,7 +22,8 @@ from rest_framework import status
 import requests
 
 from awx import MODE
-from awx.api.generics import APIView
+from awx.api import serializers
+from awx.api.generics import APIView, GenericAPIView
 from awx.conf.registry import settings_registry
 from awx.main.analytics import all_collectors
 from awx.main.ha import is_ha_environment
@@ -182,10 +183,11 @@ class ApiV2PingView(APIView):
         return Response(response)
 
 
-class ApiV2SubscriptionView(APIView):
+class ApiV2SubscriptionView(GenericAPIView):
     permission_classes = (IsAuthenticated,)
     name = _('Subscriptions')
     swagger_topic = 'System Configuration'
+    serializer_class = serializers.ConfigSubscriptionSerializer
 
     def check_permissions(self, request):
         super(ApiV2SubscriptionView, self).check_permissions(request)
@@ -193,38 +195,33 @@ class ApiV2SubscriptionView(APIView):
             self.permission_denied(request)  # Raises PermissionDenied exception.
 
     def post(self, request):
-        data = request.data.copy()
-        if data.get('subscriptions_password') == '$encrypted$':
-            data['subscriptions_password'] = settings.SUBSCRIPTIONS_PASSWORD
-        try:
-            user, pw = data.get('subscriptions_username'), data.get('subscriptions_password')
-            with set_environ(**settings.AWX_TASK_ENV):
-                validated = get_licenser().validate_rh(user, pw)
-            if user:
-                settings.SUBSCRIPTIONS_USERNAME = data['subscriptions_username']
-            if pw:
-                settings.SUBSCRIPTIONS_PASSWORD = data['subscriptions_password']
-        except Exception as exc:
-            msg = _("Invalid Subscription")
-            if isinstance(exc, requests.exceptions.HTTPError) and getattr(getattr(exc, 'response', None), 'status_code', None) == 401:
-                msg = _("The provided credentials are invalid (HTTP 401).")
-            elif isinstance(exc, requests.exceptions.ProxyError):
-                msg = _("Unable to connect to proxy server.")
-            elif isinstance(exc, requests.exceptions.ConnectionError):
-                msg = _("Could not connect to subscription service.")
-            elif isinstance(exc, (ValueError, OSError)) and exc.args:
-                msg = exc.args[0]
-            else:
-                logger.exception(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
-            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
-
+        serializer = serializers.ConfigSubscriptionSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            try:
+                with set_environ(**settings.AWX_TASK_ENV):
+                    validated = get_licenser().validate_rh(serializer.data['subscriptions_username'], serializer.data['subscriptions_username'])
+            except Exception as exc:
+                msg = _("Invalid Subscription")
+                if isinstance(exc, requests.exceptions.HTTPError) and getattr(getattr(exc, 'response', None), 'status_code', None) == 401:
+                    msg = _("The provided credentials are invalid (HTTP 401).")
+                elif isinstance(exc, requests.exceptions.ProxyError):
+                    msg = _("Unable to connect to proxy server.")
+                elif isinstance(exc, requests.exceptions.ConnectionError):
+                    msg = _("Could not connect to subscription service.")
+                elif isinstance(exc, (ValueError, OSError)) and exc.args:
+                    msg = exc.args[0]
+                else:
+                    logger.exception(smart_str(u"Invalid subscription submitted."), extra=dict(actor=request.user.username))
+                return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
         return Response(validated)
 
 
-class ApiV2AttachView(APIView):
+class ApiV2AttachView(GenericAPIView):
     permission_classes = (IsAuthenticated,)
     name = _('Attach Subscription')
     swagger_topic = 'System Configuration'
+    serializer_class = serializers.ConfigAttachSerializer
 
     def check_permissions(self, request):
         super(ApiV2AttachView, self).check_permissions(request)

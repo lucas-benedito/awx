@@ -6301,3 +6301,34 @@ class ActivityStreamSerializer(BaseSerializer):
         if obj.setting:
             summary_fields['setting'] = [obj.setting]
         return summary_fields
+
+
+class ConfigSubscriptionSerializer(serializers.Serializer):
+    subscriptions_password = serializers.CharField()
+    subscriptions_username = serializers.CharField()
+
+    class Meta:
+        fields = ('*', 'subscriptions_password', 'subscriptions_username')
+
+    def validate(self, validated_data):
+        """
+        Validate post data
+        """
+        if validated_data['subscriptions_password'] == '$encrypted$':
+            validated_data['subscriptions_password'] = settings.SUBSCRIPTIONS_PASSWORD
+        return validated_data
+
+    def create(self, validated_data):
+        """
+        Create Subscription setting
+        """
+        settings.SUBSCRIPTIONS_USERNAME = validated_data['subscriptions_username']
+        settings.SUBSCRIPTIONS_PASSWORD = validated_data['subscriptions_password']
+        return validated_data
+
+
+class ConfigAttachSerializer(serializers.Serializer):
+    pool_id = serializers.CharField()
+
+    class Meta:
+        fields = ('*', 'pool_id')
